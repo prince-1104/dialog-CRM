@@ -148,23 +148,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Demo credentials */}
-        <div className="mt-6 p-4 bg-zinc-900/30 border border-zinc-800/50 rounded-xl">
-          <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-2">Demo Credentials</p>
-          {mode === 'tenant' ? (
-            <div className="space-y-1 text-xs text-zinc-500">
-              <p>Workspace: <span className="text-zinc-300 font-mono">nmc-demo</span></p>
-              <p>Admin: <span className="text-zinc-300 font-mono">admin@nmc-demo.com / Admin@123</span></p>
-              <p>Manager: <span className="text-zinc-300 font-mono">manager@nmc-demo.com / Manager@123</span></p>
-              <p>Agent: <span className="text-zinc-300 font-mono">agent@nmc-demo.com / Agent@123</span></p>
-            </div>
-          ) : (
-            <div className="text-xs text-zinc-500">
-              <p>Email: <span className="text-zinc-300 font-mono">superadmin@nmc.com</span></p>
-              <p>Password: <span className="text-zinc-300 font-mono">SuperAdmin@123</span></p>
-            </div>
-          )}
-        </div>
+
       </div>
     </div>
   );
