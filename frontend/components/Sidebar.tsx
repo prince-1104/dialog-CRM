@@ -26,7 +26,7 @@ export const Sidebar: React.FC = () => {
     { id: 'dashboard' as TabType, label: 'Dashboard', icon: LayoutGrid },
     { id: 'contacts' as TabType, label: 'Contacts Directory', icon: Users },
     { id: 'pipelines' as TabType, label: 'Deals Pipeline', icon: SquareStack },
-    { id: 'agents' as TabType, label: 'AI Voice Agents', icon: Bot, badge: 'Smart' },
+    { id: 'agents' as TabType, label: 'Team & Agents', icon: Bot, badge: 'Smart' },
     { id: 'campaigns' as TabType, label: 'Voice Campaigns', icon: PhoneCall },
     { id: 'calls' as TabType, label: 'Call Transcripts', icon: History },
     { id: 'settings' as TabType, label: 'Settings', icon: Settings },
