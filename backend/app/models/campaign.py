@@ -2,78 +2,88 @@ import uuid
 from datetime import datetime, time
 from enum import Enum as PyEnum
 from typing import Optional
-from sqlalchemy import String, Integer, Time, DateTime, ForeignKey, UniqueConstraint, Enum
+from sqlalchemy import String, Integer, Time, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
+
+class CampaignType(str, PyEnum):
+    inbound = "inbound"
+    outbound = "outbound"
+
+
 class CampaignStatus(str, PyEnum):
     draft = "draft"
-    syncing = "syncing"
     active = "active"
     paused = "paused"
     completed = "completed"
-    cancelled = "cancelled"
 
-class CampaignContactStatus(str, PyEnum):
-    pending = "pending"
-    calling = "calling"
-    called_answered = "called_answered"
-    called_no_answer = "called_no_answer"
-    called_busy = "called_busy"
-    failed = "failed"
+
+class RoutingType(str, PyEnum):
+    round_robin = "round_robin"
+    skill_based = "skill_based"
+    language_based = "language_based"
+    shift_based = "shift_based"
+    priority = "priority"
+
 
 class Campaign(Base):
+    """
+    Inbound or Outbound campaign.
+    Inbound: Customer calls campaign number → routing engine → agent
+    Outbound: Campaign dials customers → connects to agent / AI agent
+    """
     __tablename__ = "campaigns"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
-    dialog_campaign_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
-    status: Mapped[CampaignStatus] = mapped_column(Enum(CampaignStatus, native_enum=False), default=CampaignStatus.draft, nullable=False)
-    
-    total_contacts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_called: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_answered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_interested: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_not_interested: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_transferred: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    stat_no_answer: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
-    start_time: Mapped[time] = mapped_column(Time, nullable=False)
-    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    type: Mapped[CampaignType] = mapped_column(String(20), nullable=False)
+    status: Mapped[CampaignStatus] = mapped_column(String(20), default=CampaignStatus.draft, nullable=False)
+
+    phone_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # campaign DID
+    script_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("scripts.id", ondelete="SET NULL"), nullable=True)
+    language: Mapped[str] = mapped_column(String(50), default="english", nullable=False)
+
+    # Routing
+    routing_type: Mapped[RoutingType] = mapped_column(String(50), default=RoutingType.round_robin, nullable=False)
+
+    # Schedule
+    start_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    end_time: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     timezone: Mapped[str] = mapped_column(String(100), default="Asia/Kolkata", nullable=False)
     max_concurrent_calls: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
-    
-    created_by_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    
+
+    # Denormalized stats
+    total_contacts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_calls: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_answered: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_converted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    created_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # Relationships
     created_by = relationship("User", foreign_keys=[created_by_id])
-    contacts = relationship("CampaignContact", back_populates="campaign", cascade="all, delete-orphan")
+    agents = relationship("CampaignAgent", back_populates="campaign", cascade="all, delete-orphan")
+    script = relationship("Script", foreign_keys=[script_id])
 
 
-class CampaignContact(Base):
-    __tablename__ = "campaign_contacts"
+class CampaignAgent(Base):
+    """Links agents to campaigns with priority for routing."""
+    __tablename__ = "campaign_agents"
     __table_args__ = (
-        UniqueConstraint("campaign_id", "contact_id", name="uq_campaign_contact"),
+        UniqueConstraint("campaign_id", "agent_id", name="uq_campaign_agent"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     campaign_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
-    contact_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), nullable=False, index=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
-    call_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey("calls.id", ondelete="SET NULL"), nullable=True)
-    
-    status: Mapped[CampaignContactStatus] = mapped_column(Enum(CampaignContactStatus, native_enum=False), default=CampaignContactStatus.pending, nullable=False)
-    
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
-    campaign = relationship("Campaign", back_populates="contacts")
-    contact = relationship("Contact", foreign_keys=[contact_id])
-    call = relationship("Call", foreign_keys=[call_id])
+    campaign = relationship("Campaign", back_populates="agents")
+    agent = relationship("User", foreign_keys=[agent_id])

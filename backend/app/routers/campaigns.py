@@ -1,289 +1,222 @@
+"""Campaign management — CRUD, agent assignment, stats."""
 import uuid
-from typing import List, Optional, Dict, Any
-from datetime import datetime, time
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from datetime import datetime, time as dt_time
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, update, delete, desc
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from app.database import get_db
-from app.models.campaign import Campaign, CampaignContact, CampaignStatus, CampaignContactStatus
-from app.models.contact import Contact
-from app.models.workspace import Workspace, UserRole
-from app.models.user import User
-from app.schemas.campaign import (
-    CampaignCreate, CampaignUpdate, CampaignResponse,
-    CampaignContactResponse, CampaignStatsResponse
+from app.models.user import User, UserRole
+from app.models.campaign import Campaign, CampaignAgent
+from app.schemas.platform import (
+    CampaignCreate, CampaignUpdate, CampaignResponse, CampaignAgentAssign
 )
 from app.dependencies.auth import get_current_user, require_role
-from app.services.dialog_client import DialogClient
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
-@router.get("", response_model=List[CampaignResponse])
+
+@router.get("/", response_model=List[CampaignResponse])
 async def list_campaigns(
+    type: Optional[str] = Query(None, pattern="^(inbound|outbound)$"),
+    status_filter: Optional[str] = Query(None, alias="status"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    stmt = select(Campaign).where(Campaign.workspace_id == current_user.workspace_id).order_by(desc(Campaign.created_at))
-    res = await db.execute(stmt)
-    campaigns = res.scalars().all()
-    
-    # We will format start_time and end_time as strings in the schema
-    result = []
-    for camp in campaigns:
-        # Pydantic will auto format time object to HH:MM:SS or custom
-        result.append(camp)
-    return result
+    stmt = select(Campaign).where(Campaign.tenant_id == current_user.tenant_id)
+    if type:
+        stmt = stmt.where(Campaign.type == type)
+    if status_filter:
+        stmt = stmt.where(Campaign.status == status_filter)
+    stmt = stmt.order_by(Campaign.created_at.desc())
+    result = await db.execute(stmt)
+    return result.scalars().all()
 
-@router.post("", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post("/", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
 async def create_campaign(
     payload: CampaignCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.manager))
 ):
-    # Retrieve details of selected contacts
-    contact_stmt = select(Contact).where(
-        Contact.id.in_(payload.contact_ids),
-        Contact.workspace_id == current_user.workspace_id
+    from app.models.tenant import Tenant
+    tenant_res = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
+    tenant = tenant_res.scalar_one()
+    
+    campaign_count = await db.execute(
+        select(func.count(Campaign.id)).where(Campaign.tenant_id == current_user.tenant_id)
     )
-    contact_res = await db.execute(contact_stmt)
-    contacts = contact_res.scalars().all()
-    
-    if not contacts:
-        raise HTTPException(status_code=400, detail="No valid contacts selected")
+    if (campaign_count.scalar() or 0) >= tenant.max_campaigns:
+        raise HTTPException(status_code=400, detail=f"Campaign limit reached ({tenant.max_campaigns}).")
 
-    # Load workspace creds
-    ws_stmt = select(Workspace).where(Workspace.id == current_user.workspace_id)
-    ws_res = await db.execute(ws_stmt)
-    workspace = ws_res.scalar_one_or_none()
-    
-    # Format time fields "HH:MM" -> python time object
-    try:
-        sh, sm = map(int, payload.start_time.split(":"))
-        eh, em = map(int, payload.end_time.split(":"))
-        start_time_obj = time(sh, sm)
-        end_time_obj = time(eh, em)
-    except Exception:
-         raise HTTPException(status_code=400, detail="Invalid start_time or end_time format. Must be HH:MM")
-
-    # Save campaign to DB first
     campaign = Campaign(
-        workspace_id=current_user.workspace_id,
+        tenant_id=current_user.tenant_id,
         name=payload.name,
-        description=payload.description,
-        status=CampaignStatus.draft,
-        total_contacts=len(contacts),
-        start_time=start_time_obj,
-        end_time=end_time_obj,
+        type=payload.type,
+        phone_number=payload.phone_number,
+        script_id=payload.script_id,
+        language=payload.language,
+        routing_type=payload.routing_type,
         timezone=payload.timezone,
         max_concurrent_calls=payload.max_concurrent_calls,
-        created_by_id=current_user.id
+        created_by_id=current_user.id,
     )
+    
+    # Parse time strings
+    if payload.start_time:
+        h, m = map(int, payload.start_time.split(":"))
+        campaign.start_time = dt_time(h, m)
+    if payload.end_time:
+        h, m = map(int, payload.end_time.split(":"))
+        campaign.end_time = dt_time(h, m)
+    
     db.add(campaign)
-    await db.flush()
-
-    # Link contacts
-    for contact in contacts:
-        cc = CampaignContact(
-            campaign_id=campaign.id,
-            contact_id=contact.id,
-            workspace_id=current_user.workspace_id,
-            status=CampaignContactStatus.pending
-        )
-        db.add(cc)
-
-    # Call Dialog client to register campaign
-    dialog_contacts = []
-    for c in contacts:
-         dialog_contacts.append({
-              "phone": c.phone,
-              "firstName": c.first_name,
-              "lastName": c.last_name or "",
-              "company": c.company or ""
-         })
-
-    try:
-        async with DialogClient(workspace) as client:
-            dialog_res = await client.create_campaign(
-                 name=payload.name,
-                 contacts=dialog_contacts,
-                 start_time=payload.start_time,
-                 end_time=payload.end_time,
-                 timezone=payload.timezone,
-                 max_concurrent_calls=payload.max_concurrent_calls
-            )
-        campaign.dialog_campaign_id = dialog_res.get("campaignId")
-        campaign.status = CampaignStatus.syncing
-        await db.commit()
-        await db.refresh(campaign)
-        return campaign
-    except Exception as e:
-        await db.rollback()
-        raise HTTPException(status_code=502, detail=f"Failed to create campaign in Dialog calling system: {str(e)}")
-
-@router.get("/{id}")
-async def get_campaign_details(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    stmt = select(Campaign).where(Campaign.id == id, Campaign.workspace_id == current_user.workspace_id)
-    res = await db.execute(stmt)
-    campaign = res.scalar_one_or_none()
-    if not campaign:
-         raise HTTPException(status_code=404, detail="Campaign not found")
-         
-    return campaign
-
-@router.post("/{id}/start", response_model=CampaignResponse)
-async def start_campaign(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.manager))
-):
-    stmt = select(Campaign).where(Campaign.id == id, Campaign.workspace_id == current_user.workspace_id)
-    res = await db.execute(stmt)
-    campaign = res.scalar_one_or_none()
-    if not campaign:
-         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    if not campaign.dialog_campaign_id:
-         raise HTTPException(status_code=400, detail="Campaign has not been registered in Dialog system")
-
-    # Load workspace
-    ws_stmt = select(Workspace).where(Workspace.id == current_user.workspace_id)
-    ws_res = await db.execute(ws_stmt)
-    workspace = ws_res.scalar_one_or_none()
-
-    try:
-        async with DialogClient(workspace) as client:
-            await client.start_campaign(campaign.dialog_campaign_id)
-            
-        campaign.status = CampaignStatus.active
-        campaign.started_at = datetime.utcnow()
-        await db.commit()
-        await db.refresh(campaign)
-        return campaign
-    except Exception as e:
-         raise HTTPException(status_code=502, detail=f"Dialog start campaign failed: {str(e)}")
-
-@router.post("/{id}/pause", response_model=CampaignResponse)
-async def pause_campaign(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.manager))
-):
-    stmt = select(Campaign).where(Campaign.id == id, Campaign.workspace_id == current_user.workspace_id)
-    res = await db.execute(stmt)
-    campaign = res.scalar_one_or_none()
-    if not campaign:
-         raise HTTPException(status_code=404, detail="Campaign not found")
-
-    campaign.status = CampaignStatus.paused
     await db.commit()
     await db.refresh(campaign)
     return campaign
 
-@router.post("/{id}/cancel", response_model=CampaignResponse)
-async def cancel_campaign(
-    id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.manager))
-):
-    stmt = select(Campaign).where(Campaign.id == id, Campaign.workspace_id == current_user.workspace_id)
-    res = await db.execute(stmt)
-    campaign = res.scalar_one_or_none()
-    if not campaign:
-         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    campaign.status = CampaignStatus.cancelled
-    campaign.completed_at = datetime.utcnow()
-    await db.commit()
-    await db.refresh(campaign)
-    return campaign
-
-@router.get("/{id}/contacts", response_model=Dict[str, Any])
-async def list_campaign_contacts(
-    id: uuid.UUID,
-    status: Optional[CampaignContactStatus] = None,
-    page: int = 1,
-    limit: int = 20,
+@router.get("/{campaign_id}", response_model=CampaignResponse)
+async def get_campaign(
+    campaign_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    offset = (page - 1) * limit
-    stmt = select(CampaignContact).where(
-         CampaignContact.campaign_id == id,
-         CampaignContact.workspace_id == current_user.workspace_id
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.tenant_id == current_user.tenant_id)
     )
-    if status:
-         stmt = stmt.where(CampaignContact.status == status)
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    return campaign
 
-    count_stmt = select(func.count()).select_from(stmt.subquery())
-    count_res = await db.execute(count_stmt)
-    total = count_res.scalar_one_or_none() or 0
 
-    stmt = stmt.offset(offset).limit(limit)
-    res = await db.execute(stmt)
-    items = res.scalars().all()
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "limit": limit
-    }
-
-@router.get("/{id}/sync-status", response_model=CampaignStatsResponse)
-async def sync_campaign_status_direct(
-    id: uuid.UUID,
+@router.patch("/{campaign_id}", response_model=CampaignResponse)
+async def update_campaign(
+    campaign_id: uuid.UUID,
+    payload: CampaignUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.manager))
 ):
-    stmt = select(Campaign).where(Campaign.id == id, Campaign.workspace_id == current_user.workspace_id)
-    res = await db.execute(stmt)
-    campaign = res.scalar_one_or_none()
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.tenant_id == current_user.tenant_id)
+    )
+    campaign = result.scalar_one_or_none()
     if not campaign:
-         raise HTTPException(status_code=404, detail="Campaign not found")
+        raise HTTPException(status_code=404, detail="Campaign not found.")
 
-    if not campaign.dialog_campaign_id:
-         raise HTTPException(status_code=400, detail="Campaign has not been registered in Dialog system")
+    for k, v in payload.model_dump(exclude_unset=True).items():
+        setattr(campaign, k, v)
+    campaign.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(campaign)
+    return campaign
 
-    # Load workspace
-    ws_stmt = select(Workspace).where(Workspace.id == current_user.workspace_id)
-    ws_res = await db.execute(ws_stmt)
-    workspace = ws_res.scalar_one_or_none()
 
-    try:
-        async with DialogClient(workspace) as client:
-            data = await client.get_campaign_status(campaign.dialog_campaign_id)
-            
-        stats = data.get("stats", {})
-        campaign.total_contacts = stats.get("total", campaign.total_contacts)
-        campaign.stat_called = stats.get("called", campaign.stat_called)
-        campaign.stat_answered = stats.get("answered", campaign.stat_answered)
-        campaign.stat_interested = stats.get("interested", campaign.stat_interested)
-        campaign.stat_not_interested = stats.get("notInterested", campaign.stat_not_interested)
-        campaign.stat_transferred = stats.get("transferred", campaign.stat_transferred)
-        campaign.stat_no_answer = stats.get("noAnswer", campaign.stat_no_answer)
-        
-        dialog_status = data.get("status")
-        if dialog_status == "completed":
-             campaign.status = CampaignStatus.completed
-             campaign.completed_at = datetime.utcnow()
-        elif dialog_status == "active":
-             campaign.status = CampaignStatus.active
-             
-        await db.commit()
-        return {
-             "stats": {
-                  "total": campaign.total_contacts,
-                  "called": campaign.stat_called,
-                  "answered": campaign.stat_answered,
-                  "interested": campaign.stat_interested,
-                  "not_interested": campaign.stat_not_interested,
-                  "transferred": campaign.stat_transferred,
-                  "no_answer": campaign.stat_no_answer
-             }
+@router.delete("/{campaign_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_campaign(
+    campaign_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.manager))
+):
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.tenant_id == current_user.tenant_id)
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+    await db.delete(campaign)
+    await db.commit()
+
+
+# ============================================================================
+# Agent Assignment
+# ============================================================================
+
+@router.get("/{campaign_id}/agents")
+async def list_campaign_agents(
+    campaign_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(CampaignAgent)
+        .options(selectinload(CampaignAgent.agent))
+        .where(CampaignAgent.campaign_id == campaign_id)
+        .order_by(CampaignAgent.priority)
+    )
+    agents = result.scalars().all()
+    return [
+        {
+            "id": str(ca.id),
+            "agent_id": str(ca.agent_id),
+            "agent_name": ca.agent.full_name if ca.agent else None,
+            "agent_email": ca.agent.email if ca.agent else None,
+            "agent_status": ca.agent.availability_status if ca.agent else None,
+            "priority": ca.priority,
+            "is_active": ca.is_active,
         }
-    except Exception as e:
-         raise HTTPException(status_code=502, detail=f"Failed to sync campaign status: {str(e)}")
+        for ca in agents
+    ]
+
+
+@router.post("/{campaign_id}/agents", status_code=status.HTTP_201_CREATED)
+async def assign_agent(
+    campaign_id: uuid.UUID,
+    payload: CampaignAgentAssign,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.manager))
+):
+    # Verify campaign belongs to tenant
+    campaign = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.tenant_id == current_user.tenant_id)
+    )
+    if not campaign.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Campaign not found.")
+
+    # Verify agent belongs to same tenant
+    agent = await db.execute(
+        select(User).where(User.id == payload.agent_id, User.tenant_id == current_user.tenant_id, User.role == "agent")
+    )
+    if not agent.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Agent not found or not an agent role.")
+
+    # Check duplicate
+    existing = await db.execute(
+        select(CampaignAgent).where(
+            CampaignAgent.campaign_id == campaign_id,
+            CampaignAgent.agent_id == payload.agent_id
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Agent already assigned to this campaign.")
+
+    ca = CampaignAgent(
+        campaign_id=campaign_id,
+        agent_id=payload.agent_id,
+        priority=payload.priority,
+    )
+    db.add(ca)
+    await db.commit()
+    return {"message": "Agent assigned", "id": str(ca.id)}
+
+
+@router.delete("/{campaign_id}/agents/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unassign_agent(
+    campaign_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.manager))
+):
+    result = await db.execute(
+        select(CampaignAgent).where(
+            CampaignAgent.campaign_id == campaign_id,
+            CampaignAgent.agent_id == agent_id
+        )
+    )
+    ca = result.scalar_one_or_none()
+    if not ca:
+        raise HTTPException(status_code=404, detail="Assignment not found.")
+    await db.delete(ca)
+    await db.commit()

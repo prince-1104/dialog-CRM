@@ -3,26 +3,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
 
 from app.config import settings
 from app.database import engine
 from app.redis_client import check_redis_connection, redis_pool
-from app.utils.rate_limit import limiter
 
-# Direct router imports
+# V2 Router imports
 from app.routers.auth import router as auth_router
-from app.routers.workspace import router as workspace_router
-from app.routers.contacts import router as contacts_router
-from app.routers.pipelines import router as pipelines_router
-from app.routers.deals import router as deals_router
-from app.routers.calls import router as calls_router
+from app.routers.super_admin import router as super_admin_router
+from app.routers.users import router as users_router
 from app.routers.campaigns import router as campaigns_router
-from app.routers.agents import router as agents_router
-from app.routers.analytics import router as analytics_router
-from app.routers.webhooks import router as webhooks_router
-from app.routers.ws import router as ws_router
+from app.routers.customers import router as customers_router
+from app.routers.scripts import router as scripts_router
+from app.routers.call_operations import disp_router, cdr_router, cb_router
+from app.routers.reports import router as reports_router
 
 # Logger setup
 logging.basicConfig(
@@ -33,43 +27,33 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Initializing Dialog CRM SaaS Backend Services...")
+    logger.info("Initializing Multi-Tenant Contact Center Platform...")
     
-    # 1. Test database connection
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        logger.info("Lifespan check: Database connection test SUCCESSFUL.")
+        logger.info("Database connection: OK")
     except Exception as e:
-        logger.critical(f"Lifespan check: Database connection test FAILED! Details: {e}")
+        logger.critical(f"Database connection FAILED: {e}")
         
-    # 2. Test Redis connection
     redis_ok = await check_redis_connection()
-    if redis_ok:
-        logger.info("Lifespan check: Redis connection test SUCCESSFUL.")
-    else:
-        logger.critical("Lifespan check: Redis connection test FAILED!")
+    logger.info(f"Redis connection: {'OK' if redis_ok else 'FAILED'}")
         
     yield
     
-    # 4 & 5. Cleanup connections
-    logger.info("Shutting down backend, disposing connection pools...")
+    logger.info("Shutting down, disposing connection pools...")
     await redis_pool.disconnect()
     await engine.dispose()
     logger.info("Shutdown completed.")
 
 app = FastAPI(
-    title="Dialog CRM REST & Real-time API",
-    description="Multi-tenant SaaS CRM with Dialog voice calls orchestration layer.",
-    version="1.0.0",
+    title="NMC Contact Center Platform API",
+    description="Multi-tenant contact center SaaS with campaigns, CRM, dialer, and reporting.",
+    version="2.0.0",
     lifespan=lifespan
 )
 
-# SlowAPI Rate Limiting exception mapping
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# CORS Policy
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -84,23 +68,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register route prefixes
+# ============================================================================
+# Register Routers
+# ============================================================================
+
+# Auth
 app.include_router(auth_router)
-app.include_router(workspace_router)
-app.include_router(contacts_router)
-app.include_router(pipelines_router)
-app.include_router(deals_router)
-app.include_router(calls_router)
+
+# Super Admin Portal
+app.include_router(super_admin_router)
+
+# Tenant-scoped endpoints
+app.include_router(users_router)
 app.include_router(campaigns_router)
-app.include_router(agents_router)
-app.include_router(analytics_router)
-app.include_router(webhooks_router)
-app.include_router(ws_router)
+app.include_router(customers_router)
+app.include_router(scripts_router)
+app.include_router(disp_router)
+app.include_router(cdr_router)
+app.include_router(cb_router)
+app.include_router(reports_router)
+
 
 @app.get("/api/health", tags=["system"])
 async def health_status():
     return {
         "status": "healthy",
+        "platform": "NMC Contact Center",
+        "version": "2.0.0",
         "environment": settings.ENVIRONMENT,
-        "api_version": "1.0.0"
     }

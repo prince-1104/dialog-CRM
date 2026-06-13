@@ -1,41 +1,36 @@
 from app.database import Base
-from app.models.workspace import Workspace, WorkspaceInvitation, WorkspacePlan, UserRole
-from app.models.user import User, RefreshToken
-from app.models.contact import Contact, ContactSource, ContactStatus, CallOutcome
-from app.models.pipeline import Pipeline, PipelineStage
-from app.models.deal import Deal, DealStatus
-from app.models.crm_agent import CrmAgent
-from app.models.campaign import Campaign, CampaignContact, CampaignStatus, CampaignContactStatus
-from app.models.call import Call, CallEvent, CallDirection, CallStatus, CallTransferType
-from app.models.activity import Activity, Note, ActivityType
+
+# Core
+from app.models.super_admin import SuperAdmin
+from app.models.tenant import Tenant, TenantSettings, TenantStatus, TenantPlan
+from app.models.user import User, RefreshToken, UserRole, AvailabilityStatus
+
+# Campaigns
+from app.models.campaign import Campaign, CampaignAgent, CampaignType, CampaignStatus, RoutingType
+
+# CRM
+from app.models.customer import Customer, CustomerNote
+
+# Calls
+from app.models.call_log import CallLog
+from app.models.disposition import DispositionTemplate, DEFAULT_DISPOSITIONS
+from app.models.callback import Callback
+
+# Scripts
+from app.models.script import Script, ScriptStep
 
 __all__ = [
     "Base",
-    "Workspace",
-    "WorkspaceInvitation",
-    "WorkspacePlan",
-    "UserRole",
-    "User",
-    "RefreshToken",
-    "Contact",
-    "ContactSource",
-    "ContactStatus",
-    "CallOutcome",
-    "Pipeline",
-    "PipelineStage",
-    "Deal",
-    "DealStatus",
-    "CrmAgent",
-    "Campaign",
-    "CampaignContact",
-    "CampaignStatus",
-    "CampaignContactStatus",
-    "Call",
-    "CallEvent",
-    "CallDirection",
-    "CallStatus",
-    "CallTransferType",
-    "Activity",
-    "Note",
-    "ActivityType",
+    # Core
+    "SuperAdmin",
+    "Tenant", "TenantSettings", "TenantStatus", "TenantPlan",
+    "User", "RefreshToken", "UserRole", "AvailabilityStatus",
+    # Campaigns
+    "Campaign", "CampaignAgent", "CampaignType", "CampaignStatus", "RoutingType",
+    # CRM
+    "Customer", "CustomerNote",
+    # Calls
+    "CallLog", "DispositionTemplate", "DEFAULT_DISPOSITIONS", "Callback",
+    # Scripts
+    "Script", "ScriptStep",
 ]

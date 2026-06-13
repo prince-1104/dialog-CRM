@@ -1,89 +1,95 @@
 import { create } from 'zustand';
-import { User, Workspace } from '../types';
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  phone?: string;
+  skills?: string[];
+  availability_status?: string;
+  tenant_id?: string;
+}
+
+export interface AuthTenant {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  plan: string;
+  max_agents: number;
+  max_campaigns: number;
+}
 
 interface AuthState {
-  user: User | null;
-  workspace: Workspace | null;
+  user: AuthUser | null;
+  tenant: AuthTenant | null;
   accessToken: string | null;
-  refreshToken: string | null;
+  isSuperAdmin: boolean;
   isAuthenticated: boolean;
+  isLoading: boolean;
+
   initialize: () => void;
-  setTokens: (accessToken: string, refreshToken: string) => void;
-  setCredentials: (user: User, workspace: Workspace, accessToken: string, refreshToken: string) => void;
+  loginTenantUser: (user: AuthUser, tenant: AuthTenant, accessToken: string, refreshToken: string) => void;
+  loginSuperAdmin: (user: AuthUser, accessToken: string, refreshToken: string) => void;
   logout: () => void;
+  setLoading: (v: boolean) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  workspace: null,
+  tenant: null,
   accessToken: null,
-  refreshToken: null,
+  isSuperAdmin: false,
   isAuthenticated: false,
+  isLoading: true,
 
   initialize: () => {
     if (typeof window === 'undefined') return;
-    const accessToken = localStorage.getItem('accessToken');
-    const refreshToken = localStorage.getItem('refreshToken');
-    const userStr = localStorage.getItem('user');
-    const workspaceStr = localStorage.getItem('workspace');
-
     try {
-      const user = userStr ? JSON.parse(userStr) : null;
-      const workspace = workspaceStr ? JSON.parse(workspaceStr) : null;
-      set({
-        accessToken,
-        refreshToken,
-        user,
-        workspace,
-        isAuthenticated: !!accessToken,
-      });
+      const token = localStorage.getItem('accessToken');
+      const userStr = localStorage.getItem('user');
+      const tenantStr = localStorage.getItem('tenant');
+      const isSuperAdmin = localStorage.getItem('isSuperAdmin') === 'true';
+
+      if (token && userStr) {
+        const user = JSON.parse(userStr);
+        const tenant = tenantStr ? JSON.parse(tenantStr) : null;
+        set({ user, tenant, accessToken: token, isSuperAdmin, isAuthenticated: true, isLoading: false });
+      } else {
+        set({ isLoading: false });
+      }
     } catch {
-      // Clear corrupt storage
       localStorage.clear();
-      set({
-        accessToken: null,
-        refreshToken: null,
-        user: null,
-        workspace: null,
-        isAuthenticated: false,
-      });
+      set({ isLoading: false });
     }
   },
 
-  setTokens: (accessToken: string, refreshToken: string) => {
-    localStorage.setItem('accessToken', accessToken);
-    localStorage.setItem('refreshToken', refreshToken);
-    set({ accessToken, refreshToken, isAuthenticated: true });
-  },
-
-  setCredentials: (user: User, workspace: Workspace, accessToken: string, refreshToken: string) => {
+  loginTenantUser: (user, tenant, accessToken, refreshToken) => {
     localStorage.setItem('accessToken', accessToken);
     localStorage.setItem('refreshToken', refreshToken);
     localStorage.setItem('user', JSON.stringify(user));
-    localStorage.setItem('workspace', JSON.stringify(workspace));
-    set({
-      user,
-      workspace,
-      accessToken,
-      refreshToken,
-      isAuthenticated: true,
-    });
+    localStorage.setItem('tenant', JSON.stringify(tenant));
+    localStorage.setItem('isSuperAdmin', 'false');
+    set({ user, tenant, accessToken, isSuperAdmin: false, isAuthenticated: true, isLoading: false });
+  },
+
+  loginSuperAdmin: (user, accessToken, refreshToken) => {
+    localStorage.setItem('accessToken', accessToken);
+    localStorage.setItem('refreshToken', refreshToken);
+    localStorage.setItem('user', JSON.stringify(user));
+    localStorage.setItem('isSuperAdmin', 'true');
+    localStorage.removeItem('tenant');
+    set({ user, tenant: null, accessToken, isSuperAdmin: true, isAuthenticated: true, isLoading: false });
   },
 
   logout: () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('refreshToken');
-    localStorage.removeItem('user');
-    localStorage.removeItem('workspace');
-    set({
-      user: null,
-      workspace: null,
-      accessToken: null,
-      refreshToken: null,
-      isAuthenticated: false,
-    });
+    localStorage.clear();
+    set({ user: null, tenant: null, accessToken: null, isSuperAdmin: false, isAuthenticated: false });
     if (typeof window !== 'undefined') {
       window.location.href = '/login';
     }
   },
+
+  setLoading: (v) => set({ isLoading: v }),
 }));
