@@ -43,6 +43,14 @@ interface AppState {
   // Active Call Actions
   startSimulatedCall: (contactId: string, contactName: string, phoneNumber: string, agentName: string, direction?: 'inbound' | 'outbound') => void;
   startRealCall: (callId: string, contactId: string, contactName: string, phoneNumber: string, agentName: string) => void;
+  startInboundTransfer: (
+    callId: string,
+    contactName: string,
+    phoneNumber: string,
+    agentName: string,
+    transferReason?: string,
+    liveTranscript?: { role: string; content: string; timestamp?: string }[],
+  ) => void;
   receiveSimulatedCall: (contactName: string, phoneNumber: string, agentName: string) => void;
   answerIncomingCall: () => void;
   endCall: () => void;
@@ -96,6 +104,38 @@ export const useStore = create<AppState>((set) => ({
       ],
       agentName,
       isSimulation: false
+    };
+    set({ activeCall: newCall });
+  },
+
+  startInboundTransfer: (callId, contactName, phoneNumber, agentName, transferReason, liveTranscript = []) => {
+    const fmtTime = (ts?: string) => {
+      if (!ts) return '00:00';
+      try {
+        return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return '00:00';
+      }
+    };
+    const priorTurns: CallTranscript[] = liveTranscript.map((t) => ({
+      sender: t.role === 'user' ? 'customer' : t.role === 'assistant' ? 'agent' : 'system',
+      text: t.content,
+      timestamp: fmtTime(t.timestamp),
+    }));
+    const newCall: ActiveCall = {
+      id: callId,
+      contactId: callId,
+      contactName,
+      phoneNumber,
+      status: 'active',
+      direction: 'inbound',
+      duration: 0,
+      transcripts: [
+        { sender: 'system', text: `Transferred from Dialog${transferReason ? `: ${transferReason}` : ''}`, timestamp: '00:00' },
+        ...priorTurns,
+      ],
+      agentName,
+      isSimulation: false,
     };
     set({ activeCall: newCall });
   },

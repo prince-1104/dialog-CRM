@@ -2,123 +2,164 @@
 import React, { useEffect, useState } from 'react';
 import { getDashboardStats } from '../lib/api';
 import { useAuthStore } from '../store/auth';
-import { BarChart3, Phone, Users, Megaphone, Clock, TrendingUp } from 'lucide-react';
+import { AgentDashboardView } from './AgentDashboardView';
+import { BarChart3, Phone, Users, Megaphone, Clock, TrendingUp, ArrowUpRight, Activity, Zap } from 'lucide-react';
+
+const GREET = () => {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+};
+
+const SkeletonCard = () => (
+  <div className="stat-card stat-violet p-5" style={{ minHeight: 110 }}>
+    <div className="shimmer rounded-lg h-4 w-24 mb-3" />
+    <div className="shimmer rounded-lg h-8 w-16 mb-2" />
+    <div className="shimmer rounded-lg h-3 w-20" />
+  </div>
+);
 
 export const DashboardView: React.FC = () => {
   const { tenant, user } = useAuthStore();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const isAgent = user?.role === 'agent';
+
+  // Agents get their own dedicated dashboard
+  if (isAgent) return <AgentDashboardView />;
 
   useEffect(() => {
-    loadStats();
+    getDashboardStats()
+      .then(setStats)
+      .catch(console.error)
+      .finally(() => setLoading(false));
   }, []);
 
-  const loadStats = async () => {
-    try {
-      const data = await getDashboardStats();
-      setStats(data);
-    } catch (err) {
-      console.error('Failed to load stats:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const formatDuration = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
+  const formatDuration = (s: number) => {
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   };
 
-  const statCards = stats ? [
-    { label: 'Total Campaigns', value: stats.campaigns?.total || 0, subtext: `${stats.campaigns?.active || 0} active`, icon: Megaphone, color: 'purple' },
-    { label: 'Total Calls', value: stats.calls?.total || 0, subtext: `${stats.calls?.completed || 0} completed`, icon: Phone, color: 'emerald' },
-    { label: 'CRM Customers', value: stats.customers?.total || 0, subtext: 'In database', icon: Users, color: 'blue' },
-    { label: 'Active Agents', value: `${stats.agents?.online || 0} / ${stats.agents?.total || 0}`, subtext: 'Online now', icon: TrendingUp, color: 'amber' },
-    { label: 'Avg Handling Time', value: formatDuration(stats.calls?.avg_handling_time || 0), subtext: 'Per call', icon: Clock, color: 'pink' },
-    { label: 'Total Talk Time', value: formatDuration(stats.calls?.total_duration_seconds || 0), subtext: 'All agents', icon: BarChart3, color: 'indigo' },
+  type StatColor = 'violet' | 'emerald' | 'sky' | 'amber' | 'rose' | 'indigo';
+
+  const statCards: { label: string; value: string | number; subtext: string; icon: any; color: StatColor; trend?: string }[] = stats ? [
+    { label: 'Total Campaigns', value: stats.campaigns?.total || 0, subtext: `${stats.campaigns?.active || 0} active`, icon: Megaphone, color: 'violet', trend: '+2 this week' },
+    { label: 'Total Calls', value: stats.calls?.total || 0, subtext: `${stats.calls?.completed || 0} completed`, icon: Phone, color: 'emerald', trend: '+12% vs last week' },
+    { label: 'CRM Customers', value: stats.customers?.total || 0, subtext: 'In database', icon: Users, color: 'sky' },
+    { label: 'Agents Online', value: `${stats.agents?.online || 0} / ${stats.agents?.total || 0}`, subtext: 'Available now', icon: Activity, color: 'amber' },
+    { label: 'Avg Handle Time', value: formatDuration(stats.calls?.avg_handling_time || 0), subtext: 'Per call', icon: Clock, color: 'rose' },
+    { label: 'Total Talk Time', value: formatDuration(stats.calls?.total_duration_seconds || 0), subtext: 'All agents combined', icon: BarChart3, color: 'indigo' },
   ] : [];
 
-  const colorMap: Record<string, string> = {
-    purple: 'from-purple-500/20 to-purple-600/5 border-purple-500/20 text-purple-400',
-    emerald: 'from-emerald-500/20 to-emerald-600/5 border-emerald-500/20 text-emerald-400',
-    blue: 'from-blue-500/20 to-blue-600/5 border-blue-500/20 text-blue-400',
-    amber: 'from-amber-500/20 to-amber-600/5 border-amber-500/20 text-amber-400',
-    pink: 'from-pink-500/20 to-pink-600/5 border-pink-500/20 text-pink-400',
-    indigo: 'from-indigo-500/20 to-indigo-600/5 border-indigo-500/20 text-indigo-400',
+  const planColorMap: Record<string, string> = {
+    starter: '#0ea5e9',
+    pro: '#8b5cf6',
+    enterprise: '#f59e0b',
   };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-8 h-8 border-2 border-purple-500/30 border-t-purple-500 rounded-full animate-spin" />
-      </div>
-    );
-  }
+  const planColor = planColorMap[tenant?.plan || ''] || '#8b5cf6';
 
   return (
     <div className="space-y-6">
-      {/* Welcome */}
-      <div>
-        <h1 className="text-xl font-bold text-zinc-100">Welcome back, {user?.full_name}</h1>
-        <p className="text-sm text-zinc-500 mt-1">{tenant?.name} - {tenant?.plan?.toUpperCase()} Plan</p>
-      </div>
 
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {statCards.map((card, i) => {
-          const Icon = card.icon;
-          const colors = colorMap[card.color] || colorMap.purple;
-          return (
-            <div key={i} className={`bg-gradient-to-br ${colors} border rounded-2xl p-5 transition-all hover:scale-[1.02]`}>
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-xs text-zinc-500 font-medium">{card.label}</p>
-                  <p className="text-2xl font-bold text-zinc-100 mt-1">{card.value}</p>
-                  <p className="text-xs text-zinc-500 mt-1">{card.subtext}</p>
-                </div>
-                <div className={`p-2 rounded-xl bg-zinc-950/40`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Quick info */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-6">
-          <h3 className="text-sm font-semibold text-zinc-300 mb-4">Workspace Info</h3>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-zinc-500">Workspace</span><span className="text-zinc-200">{tenant?.name}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Slug</span><span className="text-zinc-200 font-mono">{tenant?.slug}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Plan</span><span className="text-zinc-200 capitalize">{tenant?.plan}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Max Agents</span><span className="text-zinc-200">{tenant?.max_agents}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Max Campaigns</span><span className="text-zinc-200">{tenant?.max_campaigns}</span></div>
+      {/* ── Hero Welcome ── */}
+      <div
+        className="rounded-2xl p-6 relative overflow-hidden"
+        style={{
+          background: 'linear-gradient(135deg, rgba(124,58,237,0.15) 0%, rgba(79,70,229,0.08) 50%, rgba(8,12,20,0) 100%)',
+          border: '1px solid rgba(124,58,237,0.2)',
+        }}
+      >
+        {/* Background glow orb */}
+        <div
+          style={{
+            position: 'absolute', top: -40, right: -40,
+            width: 200, height: 200,
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(124,58,237,0.15) 0%, transparent 70%)',
+            pointerEvents: 'none',
+          }}
+        />
+        <div className="relative flex items-start justify-between">
+          <div>
+            <p className="text-sm font-medium mb-1" style={{ color: '#8b5cf6' }}>
+              {GREET()}, {user?.full_name?.split(' ')[0]} 👋
+            </p>
+            <h1 className="text-2xl font-bold text-white mb-1">
+              {isAgent ? 'Your Agent Dashboard' : `${tenant?.name || 'Workspace'} Overview`}
+            </h1>
+            <p className="text-sm" style={{ color: '#64748b' }}>
+              {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
           </div>
-        </div>
-
-        <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl p-6">
-          <h3 className="text-sm font-semibold text-zinc-300 mb-4">Your Profile</h3>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between"><span className="text-zinc-500">Name</span><span className="text-zinc-200">{user?.full_name}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Email</span><span className="text-zinc-200">{user?.email}</span></div>
-            <div className="flex justify-between"><span className="text-zinc-500">Role</span><span className="text-zinc-200 capitalize">{user?.role?.replace('_', ' ')}</span></div>
-            {user?.phone && <div className="flex justify-between"><span className="text-zinc-500">Phone</span><span className="text-zinc-200">{user.phone}</span></div>}
-            {(user?.skills?.length || 0) > 0 && (
-              <div className="flex justify-between items-start">
-                <span className="text-zinc-500">Skills</span>
-                <div className="flex flex-wrap gap-1 justify-end">
-                  {user?.skills?.map((s, i) => (
-                    <span key={i} className="px-2 py-0.5 text-[10px] bg-purple-500/10 text-purple-300 rounded border border-purple-500/20">{s}</span>
-                  ))}
-                </div>
+          <div className="flex items-center gap-3">
+            {tenant?.plan && (
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+                style={{
+                  background: `${planColor}12`,
+                  border: `1px solid ${planColor}30`,
+                  color: planColor,
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                }}
+              >
+                <Zap size={12} />
+                {tenant.plan.toUpperCase()} Plan
               </div>
             )}
+            <div
+              className="px-3 py-1.5 rounded-xl"
+              style={{
+                background: 'rgba(16,185,129,0.08)',
+                border: '1px solid rgba(16,185,129,0.2)',
+                color: '#34d399',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <div className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              System Online
+            </div>
           </div>
         </div>
       </div>
+
+      {/* ── Stat Cards (manager/admin only) ── */}
+      {!isAgent && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {loading
+            ? Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
+            : statCards.map((card, i) => {
+                const Icon = card.icon;
+                return (
+                  <div key={i} className={`stat-card stat-${card.color} p-5`}>
+                    <div className="flex items-start justify-between mb-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: '#64748b' }}>
+                        {card.label}
+                      </p>
+                      <div className={`stat-icon stat-${card.color}`} style={{ width: 36, height: 36 }}>
+                        <Icon size={16} />
+                      </div>
+                    </div>
+                    <p className="text-3xl font-bold text-white mb-1">{card.value}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs" style={{ color: '#475569' }}>{card.subtext}</p>
+                      {card.trend && (
+                        <span className="flex items-center gap-0.5 text-[10px] font-semibold text-emerald-400">
+                          <ArrowUpRight size={10} />{card.trend}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+          }
+        </div>
+      )}
+
     </div>
   );
 };
+

@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../store/auth';
 import { loginTenantUser, loginSuperAdmin } from '../../lib/api';
+import { Zap, Shield, AlertCircle, ArrowRight } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,14 +21,9 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       if (mode === 'tenant') {
-        if (!tenantSlug) {
-          setError('Please enter your workspace slug.');
-          setLoading(false);
-          return;
-        }
+        if (!tenantSlug) { setError('Please enter your workspace slug.'); setLoading(false); return; }
         const data = await loginTenantUser(email, password, tenantSlug);
         storeTenantLogin(data.user, data.tenant, data.access_token, data.refresh_token);
         router.push('/');
@@ -43,112 +39,159 @@ export default function LoginPage() {
     }
   };
 
+  const isAdmin = mode === 'admin';
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-950 relative overflow-hidden">
-      {/* Background gradient */}
-      <div className="absolute inset-0 z-0">
-        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-purple-600/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/10 rounded-full blur-[120px]" />
+    <div
+      className="min-h-screen flex items-center justify-center relative overflow-hidden"
+      style={{ background: '#080c14' }}
+    >
+      {/* Background glows */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: '-15%', left: '-10%', width: 700, height: 700, borderRadius: '50%', background: 'radial-gradient(circle, rgba(124,58,237,0.08) 0%, transparent 70%)' }} />
+        <div style={{ position: 'absolute', bottom: '-15%', right: '-10%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(99,102,241,0.07) 0%, transparent 70%)' }} />
+        {/* Grid lines */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)',
+          backgroundSize: '60px 60px',
+        }} />
       </div>
 
       <div className="relative z-10 w-full max-w-md mx-4">
-        {/* Brand */}
+
+        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-700 mb-4 shadow-lg shadow-purple-500/20">
-            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-            </svg>
+          <div
+            className="inline-flex items-center justify-center mb-4 glow-purple"
+            style={{ width: 56, height: 56, borderRadius: 16, background: 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)' }}
+          >
+            <Zap size={24} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white mb-1">NMC Contact Center</h1>
-          <p className="text-sm text-zinc-500">Sign in to your workspace</p>
+          <p className="text-sm" style={{ color: '#475569' }}>Sign in to your workspace</p>
         </div>
 
-        {/* Mode toggle */}
-        <div className="flex bg-zinc-900/50 p-1 rounded-xl mb-6 border border-zinc-800">
+        {/* Mode Toggle */}
+        <div
+          className="flex p-1 rounded-xl mb-5"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+        >
           <button
+            type="button"
             onClick={() => { setMode('tenant'); setError(''); }}
-            className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
-              mode === 'tenant'
-                ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30'
-                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-            }`}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
+            style={{
+              background: !isAdmin ? 'rgba(139,92,246,0.15)' : 'transparent',
+              color: !isAdmin ? '#c4b5fd' : '#475569',
+              border: `1px solid ${!isAdmin ? 'rgba(139,92,246,0.3)' : 'transparent'}`,
+            }}
           >
-            Workspace Login
+            <Zap size={13} /> Workspace
           </button>
           <button
+            type="button"
             onClick={() => { setMode('admin'); setError(''); }}
-            className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-all ${
-              mode === 'admin'
-                ? 'bg-amber-600/20 text-amber-300 border border-amber-500/30'
-                : 'text-zinc-500 hover:text-zinc-300 border border-transparent'
-            }`}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all"
+            style={{
+              background: isAdmin ? 'rgba(217,119,6,0.15)' : 'transparent',
+              color: isAdmin ? '#fbbf24' : '#475569',
+              border: `1px solid ${isAdmin ? 'rgba(217,119,6,0.3)' : 'transparent'}`,
+            }}
           >
-            Super Admin
+            <Shield size={13} /> Super Admin
           </button>
         </div>
 
-        {/* Login form */}
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-6 space-y-4 backdrop-blur-sm">
+        {/* Form Card */}
+        <form onSubmit={handleLogin}>
+          <div
+            className="rounded-2xl p-6 space-y-4 mb-4"
+            style={{
+              background: 'rgba(13,17,32,0.8)',
+              border: `1px solid ${isAdmin ? 'rgba(217,119,6,0.12)' : 'rgba(139,92,246,0.12)'}`,
+              backdropFilter: 'blur(16px)',
+            }}
+          >
             {mode === 'tenant' && (
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1.5">Workspace Slug</label>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: '#64748b' }}>Workspace Slug</label>
                 <input
                   type="text"
                   value={tenantSlug}
-                  onChange={(e) => setTenantSlug(e.target.value)}
+                  onChange={e => setTenantSlug(e.target.value)}
                   placeholder="e.g. nmc-demo"
-                  className="w-full px-4 py-3 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/50 transition-all"
+                  className="input-field"
                   required
+                  style={{ fontSize: '0.9rem', padding: '0.75rem 0.875rem' }}
                 />
               </div>
             )}
-
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Email</label>
+              <label className="block text-xs font-semibold mb-1.5" style={{ color: '#64748b' }}>Email</label>
               <input
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={e => setEmail(e.target.value)}
                 placeholder="you@company.com"
-                className="w-full px-4 py-3 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/50 transition-all"
+                className="input-field"
                 required
+                style={{ fontSize: '0.9rem', padding: '0.75rem 0.875rem' }}
               />
             </div>
-
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">Password</label>
+              <label className="block text-xs font-semibold mb-1.5" style={{ color: '#64748b' }}>Password</label>
               <input
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={e => setPassword(e.target.value)}
                 placeholder="Enter your password"
-                className="w-full px-4 py-3 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-purple-500/40 focus:border-purple-500/50 transition-all"
+                className="input-field"
                 required
+                style={{ fontSize: '0.9rem', padding: '0.75rem 0.875rem' }}
               />
             </div>
           </div>
 
+          {/* Error */}
           {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-400">
+            <div
+              className="flex items-center gap-2.5 px-4 py-3 rounded-xl mb-4 text-sm"
+              style={{ background: 'rgba(244,63,94,0.08)', border: '1px solid rgba(244,63,94,0.2)', color: '#fb7185' }}
+            >
+              <AlertCircle size={15} className="shrink-0" />
               {error}
             </div>
           )}
 
+          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-3.5 rounded-xl font-semibold text-sm transition-all ${
-              mode === 'tenant'
-                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white shadow-lg shadow-purple-500/20'
-                : 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white shadow-lg shadow-amber-500/20'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm text-white transition-all disabled:opacity-50"
+            style={{
+              background: isAdmin
+                ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)'
+                : 'linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%)',
+              boxShadow: isAdmin
+                ? '0 4px 20px rgba(217,119,6,0.3)'
+                : '0 4px 20px rgba(124,58,237,0.35)',
+              transform: loading ? 'none' : undefined,
+            }}
           >
-            {loading ? 'Signing in...' : mode === 'tenant' ? 'Sign in to Workspace' : 'Sign in as Super Admin'}
+            {loading ? (
+              <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Signing in…</>
+            ) : (
+              <>{isAdmin ? <Shield size={15} /> : <Zap size={15} />}
+              {isAdmin ? 'Sign in as Super Admin' : 'Sign in to Workspace'}
+              <ArrowRight size={15} /></>
+            )}
           </button>
         </form>
 
-
+        <p className="text-center text-xs mt-6" style={{ color: '#334155' }}>
+          NMC Contact Center Platform v2.0 • Multi-tenant SaaS
+        </p>
       </div>
     </div>
   );

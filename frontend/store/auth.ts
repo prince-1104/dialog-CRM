@@ -19,6 +19,8 @@ export interface AuthTenant {
   plan: string;
   max_agents: number;
   max_campaigns: number;
+  dialog_base_url?: string;
+  dialog_webhook_registered?: boolean;
 }
 
 interface AuthState {
@@ -34,6 +36,7 @@ interface AuthState {
   loginSuperAdmin: (user: AuthUser, accessToken: string, refreshToken: string) => void;
   logout: () => void;
   setLoading: (v: boolean) => void;
+  updateAvailability: (status: string) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -92,4 +95,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   setLoading: (v) => set({ isLoading: v }),
+
+  updateAvailability: (status) => {
+    set((state) => {
+      if (!state.user) return {};
+      const user = { ...state.user, availability_status: status };
+      localStorage.setItem('user', JSON.stringify(user));
+      return { user };
+    });
+  },
 }));

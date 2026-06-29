@@ -1,6 +1,7 @@
+"use client";
 import React from 'react';
 import { AdminTab } from '../app/page';
-import { LayoutGrid, Building2, LogOut, Shield } from 'lucide-react';
+import { LayoutDashboard, Building2, LogOut, Shield } from 'lucide-react';
 
 interface Props {
   activeTab: AdminTab;
@@ -9,64 +10,110 @@ interface Props {
   userName: string;
 }
 
-export const SuperAdminSidebar: React.FC<Props> = ({ activeTab, setActiveTab, onLogout, userName }) => {
-  const items: { id: AdminTab; label: string; icon: any }[] = [
-    { id: 'admin-dashboard', label: 'Overview', icon: LayoutGrid },
-    { id: 'tenants', label: 'Tenants', icon: Building2 },
-  ];
+const ITEMS: { id: AdminTab; label: string; icon: any; desc: string }[] = [
+  { id: 'admin-dashboard', label: 'Overview', icon: LayoutDashboard, desc: 'Platform metrics' },
+  { id: 'tenants', label: 'Tenants', icon: Building2, desc: 'Manage organizations' },
+];
 
+export const SuperAdminSidebar: React.FC<Props> = ({ activeTab, setActiveTab, onLogout, userName }) => {
   return (
-    <aside className="w-60 border-r border-zinc-800 bg-zinc-950/60 backdrop-blur-md flex flex-col h-screen select-none">
-      {/* Brand */}
-      <div className="p-5 border-b border-zinc-900 flex items-center gap-3">
-        <div className="p-2 bg-amber-600/25 border border-amber-500/30 rounded-xl flex items-center justify-center">
-          <Shield className="h-5 w-5 text-amber-400" />
+    <aside
+      className="flex flex-col h-screen select-none"
+      style={{
+        width: 240,
+        background: 'linear-gradient(180deg, #0f0a00 0%, #080c14 100%)',
+        borderRight: '1px solid rgba(245,158,11,0.1)',
+        flexShrink: 0,
+      }}
+    >
+      {/* ── Brand ── */}
+      <div className="px-5 py-5 flex items-center gap-3" style={{ borderBottom: '1px solid rgba(245,158,11,0.08)' }}>
+        <div
+          className="glow-amber"
+          style={{
+            width: 36, height: 36,
+            borderRadius: 10,
+            background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <Shield className="h-4 w-4 text-white" />
         </div>
         <div>
-          <h1 className="font-bold text-sm tracking-tight bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
-            NMC Admin
-          </h1>
-          <span className="text-[9px] text-zinc-600 font-mono tracking-wider uppercase">Provider Portal</span>
+          <div className="font-bold text-sm text-white tracking-tight">NMC Admin</div>
+          <div className="text-[10px] font-medium" style={{ color: '#78350f' }}>Provider Portal</div>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        <div className="text-[9px] font-mono tracking-widest text-zinc-600 uppercase px-3 mb-2 font-bold">Management</div>
-        {items.map((item) => {
+      {/* ── Provider badge ── */}
+      <div className="px-4 py-3">
+        <div
+          className="flex items-center gap-2 px-3 py-2 rounded-xl"
+          style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.15)' }}
+        >
+          <div className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+          <span className="text-[10px] font-semibold text-amber-400/80 uppercase tracking-wider">Super Admin Session</span>
+        </div>
+      </div>
+
+      {/* ── Nav ── */}
+      <nav className="flex-1 px-3 py-2 space-y-0.5">
+        <div
+          className="px-3 mb-2 font-bold uppercase tracking-widest"
+          style={{ fontSize: '0.65rem', color: '#78350f', letterSpacing: '0.1em' }}
+        >
+          Management
+        </div>
+        {ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                isActive
-                  ? 'bg-amber-600/15 border border-amber-500/20 text-amber-200'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 border border-transparent'
-              }`}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all duration-150"
+              style={{
+                background: isActive ? 'rgba(245,158,11,0.1)' : 'transparent',
+                border: `1px solid ${isActive ? 'rgba(245,158,11,0.25)' : 'transparent'}`,
+                color: isActive ? '#fbbf24' : '#78716c',
+                fontSize: '0.8375rem',
+                fontWeight: 500,
+              }}
             >
-              <Icon className={`h-4 w-4 ${isActive ? 'text-amber-400' : 'text-zinc-500'}`} />
-              <span>{item.label}</span>
+              <Icon size={16} style={{ color: isActive ? '#fbbf24' : '#57534e', flexShrink: 0 }} />
+              <div>
+                <div>{item.label}</div>
+                <div style={{ fontSize: '0.65rem', color: '#57534e', fontWeight: 400 }}>{item.desc}</div>
+              </div>
             </button>
           );
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-zinc-900">
-        <div className="flex items-center justify-between p-2 rounded-xl">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-xs font-bold text-white">
-              {userName[0]?.toUpperCase() || 'A'}
-            </div>
-            <div className="flex flex-col text-left">
-              <span className="text-xs font-semibold text-zinc-300">{userName}</span>
-              <span className="text-[10px] text-amber-400">Super Admin</span>
-            </div>
+      {/* ── User Footer ── */}
+      <div className="p-3" style={{ borderTop: '1px solid rgba(245,158,11,0.08)' }}>
+        <div
+          className="flex items-center gap-3 p-2.5 rounded-xl"
+          style={{ background: 'rgba(245,158,11,0.04)' }}
+        >
+          <div
+            className="avatar avatar-sm shrink-0"
+            style={{ background: 'linear-gradient(135deg, #d97706, #b45309)', color: 'white' }}
+          >
+            {userName[0]?.toUpperCase() || 'A'}
           </div>
-          <button onClick={onLogout} className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900 rounded-lg transition-colors">
-            <LogOut className="h-4 w-4" />
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-semibold text-slate-200 truncate">{userName}</div>
+            <div className="text-[10px]" style={{ color: '#d97706' }}>Super Admin</div>
+          </div>
+          <button
+            onClick={onLogout}
+            className="p-1.5 rounded-lg transition-colors"
+            style={{ color: '#57534e' }}
+            title="Sign out"
+          >
+            <LogOut size={14} />
           </button>
         </div>
       </div>

@@ -1,120 +1,312 @@
 "use client";
 import React, { useEffect, useState } from 'react';
-import { listUsers, createUser, updateUser, deleteUser, updateAvailability } from '../lib/api';
-import { Plus, X, UserCog, Trash2 } from 'lucide-react';
+import { listUsers, createUser, deleteUser, updateAvailability, syncAllAgentsToDialog, syncUserToDialog, formatError } from '../lib/api';
+import { Plus, X, Trash2, RefreshCw, CheckCircle2, AlertCircle, Users } from 'lucide-react';
+import { useAuthStore } from '../store/auth';
+import { ConfirmModal } from './ConfirmModal';
+
+const ROLE_BADGE: Record<string, string> = {
+  tenant_admin: 'badge-amber',
+  manager: 'badge-sky',
+  team_lead: 'badge-violet',
+  agent: 'badge-emerald',
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  online: '#10b981',
+  away: '#f59e0b',
+  offline: '#475569',
+};
 
 export const TeamView: React.FC = () => {
+  const { user: me } = useAuthStore();
   const [users, setUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', role: 'agent', phone: '', skills: '' as string, max_concurrent_calls: 1 });
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [form, setForm] = useState({ email: '', password: '', full_name: '', role: 'agent', phone: '', skills: '', max_concurrent_calls: 1 });
+  const [confirmCfg, setConfirmCfg] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    expectedValue: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    expectedValue: '',
+    onConfirm: () => {},
+  });
 
+  const load = async () => {
+    try { setLoading(true); setUsers(await listUsers()); }
+    catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  };
   useEffect(() => { load(); }, []);
-  const load = async () => { try { setUsers(await listUsers()); } catch (e) { console.error(e); } };
 
   const handleCreate = async () => {
     try {
       const data = { ...form, skills: form.skills ? form.skills.split(',').map(s => s.trim()) : [], max_concurrent_calls: Number(form.max_concurrent_calls) };
-      await createUser(data);
+      // Optimistic add
+      const tempId = `temp-${Date.now()}`;
+      const tempUser = { ...data, id: tempId, availability_status: 'offline' };
+      setUsers(prev => [...prev, tempUser]);
       setShowCreate(false);
       setForm({ email: '', password: '', full_name: '', role: 'agent', phone: '', skills: '', max_concurrent_calls: 1 });
-      load();
-    } catch (e: any) { alert(e?.response?.data?.detail || 'Failed'); }
+      const real = await createUser(data);
+      setUsers(prev => prev.map(u => u.id === tempId ? real : u));
+      if (data.role === 'agent' && real.dialog_synced === false) {
+        setSyncMsg({
+          ok: false,
+          text: real.dialog_sync_error || 'Agent created but failed to sync to Dialog. Check Settings → Dialog URL.',
+        });
+        setTimeout(() => setSyncMsg(null), 8000);
+      } else if (data.role === 'agent' && real.dialog_synced) {
+        setSyncMsg({ ok: true, text: `${real.full_name} created and synced to Dialog` });
+        setTimeout(() => setSyncMsg(null), 4000);
+      }
+    } catch (e: any) { alert(formatError(e)); load(); }
   };
 
   const toggleAvailability = async (userId: string, current: string) => {
     const next = current === 'online' ? 'offline' : 'online';
-    await updateAvailability(userId, next);
-    load();
+    // Optimistic
+    setUsers(prev => prev.map(u => u.id === userId ? { ...u, availability_status: next } : u));
+    try { await updateAvailability(userId, next); }
+    catch { setUsers(prev => prev.map(u => u.id === userId ? { ...u, availability_status: current } : u)); }
   };
 
-  const roleColors: Record<string, string> = {
-    tenant_admin: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    manager: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    team_lead: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-    agent: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  const handleSyncAll = async () => {
+    try {
+      setSyncing(true); setSyncMsg(null);
+      const r = await syncAllAgentsToDialog();
+      setSyncMsg({ ok: true, text: r.detail });
+    } catch (e: any) { setSyncMsg({ ok: false, text: formatError(e) }); }
+    finally { setSyncing(false); setTimeout(() => setSyncMsg(null), 4000); }
   };
 
-  const statusColors: Record<string, string> = {
-    online: 'bg-emerald-500', away: 'bg-amber-500', offline: 'bg-zinc-600',
+  const handleSyncOne = async (userId: string, name: string) => {
+    try { await syncUserToDialog(userId); setSyncMsg({ ok: true, text: `${name} synced to Dialog` }); }
+    catch (e: any) { setSyncMsg({ ok: false, text: formatError(e) }); }
+    setTimeout(() => setSyncMsg(null), 3000);
   };
+
+  const TEAM_DELETE_BTN = (u: any) => (
+    <button className="btn-danger" style={{ padding: '4px 8px', fontSize: '0.7rem' }} onClick={() => {
+      setConfirmCfg({
+        isOpen: true,
+        title: 'Delete Team Member',
+        message: `Are you sure you want to permanently delete the user "${u.full_name}"? They will lose access to this workspace immediately.`,
+        expectedValue: u.full_name,
+        onConfirm: async () => {
+          setConfirmCfg(prev => ({ ...prev, isOpen: false }));
+          setUsers(prev => prev.filter(x => x.id !== u.id));
+          try { await deleteUser(u.id); }
+          catch { load(); }
+        }
+      });
+    }}>
+      <Trash2 size={11} />
+    </button>
+  );
+
+  const isAdmin = me?.role === 'tenant_admin';
+  const isManager = me?.role === 'manager' || isAdmin;
+
+  const teamStats = [
+    { label: 'Total', value: users.length },
+    { label: 'Online', value: users.filter(u => u.availability_status === 'online').length },
+    { label: 'Agents', value: users.filter(u => u.role === 'agent').length },
+    { label: 'Managers', value: users.filter(u => u.role === 'manager' || u.role === 'tenant_admin').length },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-zinc-100">Team & Agents</h1>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium"><Plus className="h-4 w-4" /> Add Member</button>
+        <div>
+          <h1 className="text-xl font-bold text-white">Team & Agents</h1>
+          <p className="text-xs mt-0.5" style={{ color: '#475569' }}>{users.length} team members</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {syncMsg && (
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border ${syncMsg.ok ? 'badge-emerald' : 'badge-rose'}`}>
+              {syncMsg.ok ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+              {syncMsg.text}
+            </div>
+          )}
+          {isManager && (
+            <button className="btn-secondary" onClick={handleSyncAll} disabled={syncing}>
+              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Syncing…' : 'Sync to Dialog'}
+            </button>
+          )}
+          {isManager && (
+            <button className="btn-primary" onClick={() => setShowCreate(true)}>
+              <Plus size={14} /> Add Member
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Stats */}
+      {/* Quick stats */}
       <div className="grid grid-cols-4 gap-3">
-        {[
-          { label: 'Total', value: users.length },
-          { label: 'Admins', value: users.filter(u => u.role === 'tenant_admin').length },
-          { label: 'Managers', value: users.filter(u => u.role === 'manager').length },
-          { label: 'Agents', value: users.filter(u => u.role === 'agent').length },
-        ].map((s, i) => (
-          <div key={i} className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-4 text-center">
-            <p className="text-2xl font-bold text-zinc-100">{s.value}</p>
-            <p className="text-xs text-zinc-500">{s.label}</p>
+        {teamStats.map((s, i) => (
+          <div key={i} className="card p-4 text-center">
+            <p className="text-2xl font-bold text-white">{s.value}</p>
+            <p className="text-xs mt-0.5" style={{ color: '#475569' }}>{s.label}</p>
           </div>
         ))}
       </div>
 
-      {/* Users table */}
-      <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Table */}
+      <div className="card overflow-hidden">
+        <table className="data-table">
           <thead>
-            <tr className="border-b border-zinc-800 bg-zinc-900/50">
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Name</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Email</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Role</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Skills</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Status</th>
-              <th className="text-right px-4 py-3 text-xs font-medium text-zinc-500">Actions</th>
+            <tr>
+              <th>Member</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Skills</th>
+              <th>Status</th>
+              <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/30 transition-colors">
-                <td className="px-4 py-3 text-zinc-200 font-medium">{u.full_name}</td>
-                <td className="px-4 py-3 text-zinc-400 text-xs">{u.email}</td>
-                <td className="px-4 py-3"><span className={`px-2 py-0.5 text-[10px] rounded border capitalize ${roleColors[u.role] || ''}`}>{u.role.replace('_', ' ')}</span></td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">{(u.skills || []).slice(0, 3).map((s: string, i: number) => <span key={i} className="text-[10px] px-1.5 py-0.5 bg-zinc-800 text-zinc-400 rounded">{s}</span>)}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <button onClick={() => toggleAvailability(u.id, u.availability_status)} className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200">
-                    <div className={`h-2 w-2 rounded-full ${statusColors[u.availability_status] || statusColors.offline}`} />
-                    <span className="capitalize">{u.availability_status}</span>
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button onClick={async () => { if (confirm('Delete?')) { await deleteUser(u.id); load(); }}} className="text-red-400 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 6 }).map((_, j) => (
+                    <td key={j}><div className="shimmer rounded h-4 w-full max-w-[90px]" /></td>
+                  ))}
+                </tr>
+              ))
+            ) : users.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ textAlign: 'center', padding: '3rem 1rem', color: '#334155' }}>
+                  <Users size={28} style={{ margin: '0 auto 8px', opacity: 0.3 }} />
+                  <p className="text-sm">No team members yet</p>
                 </td>
               </tr>
-            ))}
+            ) : users.map(u => {
+              const canManage = isAdmin || (isManager && u.role === 'agent') || me?.id === u.id;
+              return (
+                <tr key={u.id}>
+                  <td>
+                    <div className="flex items-center gap-3">
+                      <div className="avatar avatar-sm relative" style={{ background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', color: 'white', fontSize: '0.65rem' }}>
+                        {u.full_name?.[0]?.toUpperCase() || '?'}
+                        <div
+                          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2"
+                          style={{ background: STATUS_COLOR[u.availability_status] || STATUS_COLOR.offline, borderColor: '#0d1120' }}
+                        />
+                      </div>
+                      <span className="font-semibold text-slate-200 text-xs">{u.full_name}</span>
+                    </div>
+                  </td>
+                  <td style={{ color: '#64748b', fontSize: '0.75rem' }}>{u.email}</td>
+                  <td><span className={`badge ${ROLE_BADGE[u.role] || 'badge-zinc'}`}>{u.role.replace(/_/g, ' ')}</span></td>
+                  <td>
+                    <div className="flex flex-wrap gap-1">
+                      {(u.skills || []).slice(0, 3).map((s: string, i: number) => (
+                        <span key={i} className="badge badge-zinc" style={{ fontSize: '0.6rem', padding: '2px 6px' }}>{s}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    {canManage ? (
+                      <button
+                        onClick={() => toggleAvailability(u.id, u.availability_status)}
+                        className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-80"
+                        style={{ color: '#64748b' }}
+                      >
+                        <div className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR[u.availability_status] || STATUS_COLOR.offline }} />
+                        <span className="capitalize">{u.availability_status || 'offline'}</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-xs" style={{ color: '#64748b' }}>
+                        <div className="h-2 w-2 rounded-full" style={{ background: STATUS_COLOR[u.availability_status] || STATUS_COLOR.offline }} />
+                        <span className="capitalize">{u.availability_status || 'offline'}</span>
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    <div className="flex items-center justify-end gap-2">
+                      {u.role === 'agent' && isManager && (
+                        <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '0.7rem' }} onClick={() => handleSyncOne(u.id, u.full_name)} title="Sync to Dialog">
+                          <RefreshCw size={11} />
+                        </button>
+                      )}
+                      {(isAdmin || (isManager && u.role === 'agent')) && TEAM_DELETE_BTN(u)}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
 
       {/* Create Modal */}
       {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-md space-y-4">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-bold text-zinc-100">Add Team Member</h2><button onClick={() => setShowCreate(false)}><X className="h-5 w-5 text-zinc-400" /></button></div>
-            {[{ l: 'Full Name', k: 'full_name' }, { l: 'Email', k: 'email' }, { l: 'Password', k: 'password' }, { l: 'Phone', k: 'phone' }].map(({ l, k }) => (
-              <div key={k}><label className="block text-xs text-zinc-400 mb-1">{l}</label><input type={k === 'password' ? 'password' : 'text'} value={(form as any)[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className="w-full px-3 py-2.5 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-purple-500/40" /></div>
-            ))}
-            <div><label className="block text-xs text-zinc-400 mb-1">Role</label>
-              <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} className="w-full px-3 py-2.5 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200">
-                <option value="agent">Agent</option><option value="team_lead">Team Lead</option><option value="manager">Manager</option><option value="tenant_admin">Tenant Admin</option>
-              </select>
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)' }}>
+          <div className="card glass-lg rounded-2xl p-6 w-full max-w-md space-y-4 fade-in-up" style={{ border: '1px solid rgba(139,92,246,0.2)' }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-white">Add Team Member</h2>
+                <p className="text-xs mt-0.5" style={{ color: '#475569' }}>Create a new workspace account</p>
+              </div>
+              <button className="btn-secondary" style={{ padding: '6px' }} onClick={() => setShowCreate(false)}><X size={15} /></button>
             </div>
-            <div><label className="block text-xs text-zinc-400 mb-1">Skills (comma separated)</label><input value={form.skills} onChange={(e) => setForm({ ...form, skills: e.target.value })} placeholder="english, hindi, sales" className="w-full px-3 py-2.5 bg-zinc-950/60 border border-zinc-700 rounded-xl text-sm text-zinc-200 focus:outline-none" /></div>
-            <button onClick={handleCreate} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold">Add Member</button>
+            <div className="divider" />
+            <div className="space-y-3">
+              {[
+                { label: 'Full Name *', key: 'full_name', type: 'text' },
+                { label: 'Email *', key: 'email', type: 'email' },
+                { label: 'Password *', key: 'password', type: 'password' },
+                { label: 'Phone', key: 'phone', type: 'tel' },
+              ].map(({ label, key, type }) => (
+                <div key={key}>
+                  <label className="block text-xs font-medium mb-1.5" style={{ color: '#64748b' }}>{label}</label>
+                  <input type={type} value={(form as any)[key]} onChange={e => setForm({ ...form, [key]: e.target.value })} className="input-field" />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#64748b' }}>Role</label>
+                <select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="input-field" style={{ cursor: 'pointer' }}>
+                  <option value="agent" style={{ background: '#0d1120' }}>Agent</option>
+                  {isAdmin && <>
+                    <option value="team_lead" style={{ background: '#0d1120' }}>Team Lead</option>
+                    <option value="manager" style={{ background: '#0d1120' }}>Manager</option>
+                    <option value="tenant_admin" style={{ background: '#0d1120' }}>Tenant Admin</option>
+                  </>}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1.5" style={{ color: '#64748b' }}>Skills <span style={{ opacity: 0.5 }}>(comma separated)</span></label>
+                <input value={form.skills} onChange={e => setForm({ ...form, skills: e.target.value })} placeholder="english, sales, technical" className="input-field" />
+              </div>
+            </div>
+            <div className="flex gap-3 pt-1">
+              <button className="btn-secondary flex-1" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn-primary flex-1" onClick={handleCreate}><Plus size={14} /> Add Member</button>
+            </div>
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={confirmCfg.isOpen}
+        title={confirmCfg.title}
+        message={confirmCfg.message}
+        expectedValue={confirmCfg.expectedValue}
+        isDestructive={true}
+        onConfirm={confirmCfg.onConfirm}
+        onCancel={() => setConfirmCfg(prev => ({ ...prev, isOpen: false }))}
+      />
     </div>
   );
 };

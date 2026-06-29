@@ -1,79 +1,143 @@
 "use client";
 import React, { useEffect, useState } from 'react';
 import { listCallLogs } from '../lib/api';
-import { Phone, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Phone, ArrowUpRight, ArrowDownLeft, Clock, RefreshCw } from 'lucide-react';
+
+const STATUS_BADGE: Record<string, string> = {
+  completed: 'badge-emerald',
+  initiated: 'badge-sky',
+  connected: 'badge-violet',
+  failed: 'badge-rose',
+  missed: 'badge-amber',
+};
 
 export const CallLogsView: React.FC = () => {
   const [logs, setLogs] = useState<any[]>([]);
-  const [filter, setFilter] = useState<string>('');
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => { load(); }, [filter]);
-  const load = async () => {
+  const load = async (dir = filter) => {
     try {
+      setLoading(true);
       const params: any = {};
-      if (filter) params.direction = filter;
+      if (dir) params.direction = dir;
       setLogs(await listCallLogs(params));
     } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   };
 
+  useEffect(() => { load(filter); }, [filter]);
+
   const formatDuration = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
+    const m = Math.floor(s / 60), sec = s % 60;
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  const statusColors: Record<string, string> = {
-    completed: 'bg-emerald-500/10 text-emerald-400',
-    initiated: 'bg-blue-500/10 text-blue-400',
-    connected: 'bg-purple-500/10 text-purple-400',
-    failed: 'bg-red-500/10 text-red-400',
-    missed: 'bg-amber-500/10 text-amber-400',
-  };
+  const FILTERS = [
+    { value: '', label: 'All Calls' },
+    { value: 'inbound', label: 'Inbound' },
+    { value: 'outbound', label: 'Outbound' },
+  ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-zinc-100">Call Logs (CDR)</h1>
-        <div className="flex gap-2">
-          {['', 'inbound', 'outbound'].map((f) => (
-            <button key={f} onClick={() => setFilter(f)} className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${filter === f ? 'bg-purple-600/20 text-purple-300 border border-purple-500/20' : 'text-zinc-500 hover:text-zinc-300 border border-zinc-800'}`}>
-              {f || 'All'}
-            </button>
-          ))}
+        <div>
+          <h1 className="text-xl font-bold text-white">Call Logs</h1>
+          <p className="text-xs mt-0.5" style={{ color: '#475569' }}>{logs.length} call records</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Filters */}
+          <div className="flex gap-1 p-1 rounded-xl" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            {FILTERS.map(f => (
+              <button
+                key={f.value}
+                onClick={() => setFilter(f.value)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: filter === f.value ? 'rgba(139,92,246,0.2)' : 'transparent',
+                  color: filter === f.value ? '#a78bfa' : '#475569',
+                  border: filter === f.value ? '1px solid rgba(139,92,246,0.3)' : '1px solid transparent',
+                }}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <button className="btn-secondary" style={{ padding: '7px 10px' }} onClick={() => load(filter)}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
       </div>
 
-      <div className="bg-zinc-900/30 border border-zinc-800 rounded-2xl overflow-hidden">
-        <table className="w-full text-sm">
+      {/* Table */}
+      <div className="card overflow-hidden">
+        <table className="data-table">
           <thead>
-            <tr className="border-b border-zinc-800 bg-zinc-900/50">
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Direction</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">From</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">To</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Status</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Duration</th>
-              <th className="text-left px-4 py-3 text-xs font-medium text-zinc-500">Date</th>
+            <tr>
+              <th>Direction</th>
+              <th>From</th>
+              <th>To</th>
+              <th>Status</th>
+              <th>Duration</th>
+              <th>Agent</th>
+              <th>Date & Time</th>
             </tr>
           </thead>
           <tbody>
-            {logs.map((l) => (
-              <tr key={l.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/30 transition-colors">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    {l.direction === 'inbound' ? <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-400" /> : <ArrowUpRight className="h-3.5 w-3.5 text-blue-400" />}
-                    <span className="text-xs text-zinc-400 capitalize">{l.direction}</span>
+            {loading ? (
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: 7 }).map((_, j) => (
+                    <td key={j}><div className="shimmer rounded h-4 w-full max-w-[80px]" /></td>
+                  ))}
+                </tr>
+              ))
+            ) : logs.length === 0 ? (
+              <tr>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '3rem 1rem', color: '#334155' }}>
+                  <Phone size={32} style={{ margin: '0 auto 8px', opacity: 0.3 }} />
+                  <p className="text-sm font-medium">No call records found</p>
+                </td>
+              </tr>
+            ) : logs.map(l => (
+              <tr key={l.id}>
+                <td>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="h-7 w-7 rounded-lg flex items-center justify-center"
+                      style={{
+                        background: l.direction === 'inbound' ? 'rgba(16,185,129,0.1)' : 'rgba(99,102,241,0.1)',
+                        border: `1px solid ${l.direction === 'inbound' ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.2)'}`,
+                      }}
+                    >
+                      {l.direction === 'inbound'
+                        ? <ArrowDownLeft size={13} style={{ color: '#34d399' }} />
+                        : <ArrowUpRight size={13} style={{ color: '#818cf8' }} />}
+                    </div>
+                    <span className="text-xs font-semibold capitalize" style={{ color: l.direction === 'inbound' ? '#34d399' : '#818cf8' }}>
+                      {l.direction}
+                    </span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-zinc-400 font-mono text-xs">{l.phone_from || '-'}</td>
-                <td className="px-4 py-3 text-zinc-400 font-mono text-xs">{l.phone_to || '-'}</td>
-                <td className="px-4 py-3"><span className={`px-2 py-0.5 text-[10px] rounded capitalize ${statusColors[l.status] || 'bg-zinc-500/10 text-zinc-400'}`}>{l.status}</span></td>
-                <td className="px-4 py-3 text-zinc-400 font-mono text-xs">{formatDuration(l.duration_seconds)}</td>
-                <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(l.created_at).toLocaleString()}</td>
+                <td><span className="font-mono text-xs">{l.phone_from || '—'}</span></td>
+                <td><span className="font-mono text-xs">{l.phone_to || '—'}</span></td>
+                <td><span className={`badge ${STATUS_BADGE[l.status] || 'badge-zinc'}`}>{l.status}</span></td>
+                <td>
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={11} style={{ color: '#475569' }} />
+                    <span className="font-mono text-xs">{formatDuration(l.duration_seconds || 0)}</span>
+                  </div>
+                </td>
+                <td style={{ color: '#64748b', fontSize: '0.75rem' }}>{l.agent_id ? '•••' : '—'}</td>
+                <td style={{ color: '#475569', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                  {new Date(l.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {logs.length === 0 && <div className="text-center text-zinc-500 py-12">No call logs yet.</div>}
       </div>
     </div>
   );

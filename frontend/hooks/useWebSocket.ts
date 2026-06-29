@@ -6,7 +6,7 @@ import { useStore } from '../store/useStore';
 import { CallStatus } from '../types';
 
 export const useWebSocket = () => {
-  const { workspace, accessToken } = useAuthStore();
+  const { tenant: workspace, accessToken } = useAuthStore();
   const { 
     updateCallStatus, 
     addTranscriptTurn, 
